@@ -43,6 +43,9 @@ python -m jev.cli sources --data benchmark.json
 # eyeball how an item is parsed
 python -m jev.cli inspect --data benchmark.json --source winogrande --limit 2
 
+# self-check the harness on a small subsample of every source (exit != 0 on failure)
+python -m jev.cli smoke --data benchmark.json
+
 # run a real model in loglikelihood mode
 python -m jev.cli run --data benchmark.json \
     --adapter qwen --model-id /path/to/qwen-finetune \
@@ -58,6 +61,26 @@ Outputs (per run) land in `outputs/`:
 - `<run>.report.md` - readable accuracy table.
 
 `benchmark.json` is intentionally **not** committed (113 MB); pass `--data`.
+
+## Smoke check
+
+`menoj smoke` verifies the **harness**, not model quality. Using the
+dependency-free `mock` adapter it samples `--per-source-limit` items from every
+source, runs both scoring modes, and checks the structural invariants:
+
+- every source parses and resolves a recipe;
+- each rendered query has candidates and a gold candidate present among them;
+- candidate counts match the raw criteria (choice dict / noul=2 / score list);
+- the distribution is a valid probability vector over exactly the candidates;
+- no item raises an error.
+
+```bash
+python -m jev.cli smoke --data benchmark.json --per-source-limit 4
+# -> checks: 464  failed: 0 ... RESULT: OK   (exit 0; exit 1 if anything is off)
+```
+
+It is also a pytest: `tests/test_smoke.py` runs it against a tiny fixture always
+and against the real `benchmark.json` when the file is present (skipped otherwise).
 
 ## Scoring methods
 

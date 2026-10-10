@@ -71,6 +71,22 @@ def cmd_inspect(args) -> int:
     return 0
 
 
+def cmd_smoke(args) -> int:
+    from .eval.smoke import SmokeConfig, run_smoke, render_smoke
+
+    modes = tuple(m.strip() for m in (args.modes or "continuation,next_token").split(",") if m.strip())
+    cfg = SmokeConfig(
+        data_path=args.data,
+        per_source_limit=args.per_source_limit,
+        modes=modes,
+        sample=args.sample,
+        seed=args.seed,
+    )
+    summary = run_smoke(cfg)
+    print(render_smoke(summary))
+    return 0 if summary["ok"] else 1
+
+
 def _build_run_config(args):
     from .eval.runner import RunConfig
     from .prompts.options import PromptOptions
@@ -137,6 +153,14 @@ def build_parser() -> argparse.ArgumentParser:
     pi.add_argument("--id")
     pi.add_argument("--limit", type=int, default=3)
     pi.set_defaults(func=cmd_inspect)
+
+    pk = sub.add_parser("smoke", help="self-check the harness on a small subsample")
+    pk.add_argument("--data", default="benchmark.json")
+    pk.add_argument("--per-source-limit", type=int, default=3)
+    pk.add_argument("--modes", default="continuation,next_token")
+    pk.add_argument("--sample", choices=["head", "random"], default="head")
+    pk.add_argument("--seed", type=int, default=0)
+    pk.set_defaults(func=cmd_smoke)
 
     pr = sub.add_parser("run", help="run the evaluation")
     pr.add_argument("--data", default="benchmark.json")

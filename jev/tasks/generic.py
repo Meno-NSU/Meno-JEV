@@ -34,6 +34,45 @@ class GenericRecipe(Recipe):
     def matches(self, item: Item) -> bool:  # fallback for everything
         return True
 
+    # -- automatic scoring-mode selection --------------------------------
+    @staticmethod
+    def _single_distinct_tokens(adapter: ModelAdapter, tokens) -> bool:
+        """True if every token is one token id and all ids are distinct."""
+        seen = set()
+        for tok in tokens:
+            ids = adapter.encode(tok, add_special_tokens=False)
+            if len(ids) != 1:
+                return False
+            if ids[0] in seen:
+                return False
+            seen.add(ids[0])
+        return True
+
+    def auto_mode(self, item: Item, adapter: ModelAdapter) -> str:
+        """Pick a scoring mode from the shape of the answer space.
+
+        * choice with <= 26 options -> ``next_token`` (score the option letter
+          A/B/C..., matching how options are listed in the prompt);
+        * noul / score whose labels are single, distinct tokens
+          (``true``/``false``, ``1``..``5``) -> ``next_token``;
+        * everything else (long/named options, big sets, text scales) ->
+          ``continuation``.
+        """
+        if item.question_type == CHOICE:
+            return "next_token" if len(item.candidates) <= 26 else "continuation"
+        if item.question_type in (NOUL, SCORE):
+            tokens = [c.token or c.text for c in item.candidates]
+            return (
+                "next_token"
+                if self._single_distinct_tokens(adapter, tokens)
+                else "continuation"
+            )
+        return "continuation"
+
+    @staticmethod
+    def _option_letter(i: int) -> str:
+        return chr(ord("A") + i)
+
     # -- continuation strings -------------------------------------------
     def _continuation(self, item: Item, cand: Candidate, options: PromptOptions) -> str:
         if item.question_type == NOUL:
@@ -65,10 +104,16 @@ class GenericRecipe(Recipe):
         options: PromptOptions,
         mode: Optional[str] = None,
     ) -> RenderedQuery:
-        score_mode = mode or "continuation"
+        requested = None if mode in (None, "auto") else mode
+        score_mode = requested or self.auto_mode(item, adapter)
         candidates = list(item.candidates)
 
-        # Prepare continuation texts (used only in continuation mode).
+        # For choice in next_token mode the scored token is the option letter
+        # shown in the prompt (A/B/C...), not the option's own text/key.
+        if score_mode == "next_token" and item.question_type == CHOICE:
+            for i, c in enumerate(candidates):
+                c.token = self._option_letter(i)
+
         for c in candidates:
             c.token = c.token or c.text
         if score_mode == "continuation":

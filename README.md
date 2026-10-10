@@ -129,8 +129,18 @@ Rotate the prompt with these flags (all also work on the full run):
 
 ## Scoring methods
 
-Two strategies, selectable with `--score-mode` (each recipe picks a sensible
-default, `--score-mode` overrides it globally):
+Two strategies. `--score-mode` defaults to **`auto`**, which picks per item from
+the shape of the answer space:
+
+- **choice with ≤26 options** → `next_token` (scores the option letter A/B/C…,
+  matching how options are listed);
+- **noul / score whose labels are single distinct tokens** (`true`/`false`,
+  `1..5`) → `next_token`;
+- **long/named options or >26 candidates** (entity, intent, big sets) →
+  `continuation`;
+- override with `--score-mode continuation` or `--score-mode next_token`.
+
+The two modes themselves:
 
 | mode | how | good for |
 | --- | --- | --- |

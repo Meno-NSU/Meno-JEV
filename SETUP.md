@@ -153,7 +153,7 @@ python -m jev.cli smoke --data benchmark.json --per-source-limit 1 \
 | `--max-context-tokens N` | cap context for long states (see below) |
 | `--max-batch-tokens N` | tokens per forward pass (default: auto from GPU memory; lower if you OOM) |
 | `--batch-size N` | candidates scored per call (default: auto by token budget) |
-| `--score-mode continuation` / `next_token` | scoring method |
+| `--score-mode auto` / `continuation` / `next_token` | scoring method (`auto` picks per item; default) |
 | `--normalize length` / `sum` / `none` | candidate log-prob normalisation |
 | `--state-fit head` / `tail` / `head_tail` / `none` | how long states are truncated |
 | `--sources a,b,c` `--types choice` `--split test` | filter the dataset |

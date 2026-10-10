@@ -13,6 +13,7 @@ def test_continuation_pipeline_picks_preferred(tiny_path, tmp_path):
     cfg = RunConfig(
         data_path=tiny_path,
         adapter="mock",
+        score_mode="continuation",
         output_dir=str(tmp_path / "out"),
         run_name="cont",
         prompt=PromptOptions(),
@@ -28,6 +29,7 @@ def test_continuation_pipeline_when_wrong(tiny_path, tmp_path):
     cfg = RunConfig(
         data_path=tiny_path,
         adapter="mock",
+        score_mode="continuation",
         output_dir=str(tmp_path / "out"),
         run_name="wrong",
         prompt=PromptOptions(),
@@ -52,6 +54,32 @@ def test_next_token_mode(tiny_path, tmp_path):
     adapter = _mock(["B", "true", "5"])
     summary = run(cfg, adapter=adapter)
     assert summary["overall"]["accuracy"] == 1.0
+
+
+def test_auto_mode_picks_next_token_for_small_sets(tiny_path, tmp_path):
+    # No score_mode -> auto: choice (<=26) and single-token noul/score labels
+    # all resolve to next_token, so letters/words/values are scored.
+    cfg = RunConfig(
+        data_path=tiny_path,
+        adapter="mock",
+        output_dir=str(tmp_path / "out"),
+        run_name="auto",
+        prompt=PromptOptions(),
+    )
+    adapter = _mock(["B", "true", "5"])
+    summary = run(cfg, adapter=adapter)
+    assert summary["overall"]["accuracy"] == 1.0
+    modes = {p["score_mode"] for p in _read_preds(cfg)}
+    assert modes == {"next_token"}
+
+
+def _read_preds(cfg):
+    import glob
+    import json
+
+    path = glob.glob(str(cfg.output_dir) + "/*.predictions.jsonl")[0]
+    with open(path) as fh:
+        return [json.loads(line) for line in fh]
 
 
 def test_filters(tiny_path, tmp_path):

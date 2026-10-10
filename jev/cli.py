@@ -212,7 +212,7 @@ def _build_run_config(args):
         per_source_limit=args.per_source_limit,
         sample=args.sample,
         seed=args.seed,
-        score_mode=args.score_mode,
+        score_mode=(None if args.score_mode == "auto" else args.score_mode),
         normalize=args.normalize,
         temperature=args.temperature,
         batch_size=args.batch_size,
@@ -269,7 +269,7 @@ def build_parser() -> argparse.ArgumentParser:
     pk = sub.add_parser("smoke", help="self-check the harness on a small subsample")
     pk.add_argument("--data", default="benchmark.json")
     pk.add_argument("--per-source-limit", type=int, default=3)
-    pk.add_argument("--modes", default="continuation,next_token")
+    pk.add_argument("--modes", default="auto,continuation,next_token")
     pk.add_argument("--sample", choices=["head", "random"], default="head")
     pk.add_argument("--seed", type=int, default=0)
     pk.add_argument("--adapter", default="mock", help="mock (default), hf, qwen, ...")
@@ -294,7 +294,8 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--sample", type=int, default=None,
                     help="draw a small stratified subsample of N items (quick eval)")
     pr.add_argument("--seed", type=int, default=0, help="sampling seed")
-    pr.add_argument("--score-mode", choices=["continuation", "next_token"], default=None)
+    pr.add_argument("--score-mode", choices=["auto", "continuation", "next_token"], default=None,
+                    help="scoring mode; default auto picks per item by answer shape")
     pr.add_argument("--normalize", choices=["length", "sum", "none"], default="length")
     pr.add_argument("--temperature", type=float, default=1.0)
     pr.add_argument("--batch-size", type=int, default=None,

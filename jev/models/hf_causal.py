@@ -23,9 +23,17 @@ tens of GB). We therefore:
 from __future__ import annotations
 
 import inspect
+import os
+import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .base import ContinuationScore, ModelAdapter, ModelConfig, register_model
+
+# Quiet the CUDA caching-allocator OOM chatter (each failed allocation logs a
+# glog "W..." warning). OOM events are still caught and summarised by us.
+# Set before torch initialises CUDA; setdefault() respects user overrides.
+os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 
 def _shim_torch_accelerator(torch) -> None:
@@ -86,6 +94,8 @@ class HFCausalAdapter(ModelAdapter):
             if self.config.extra.get("max_batch_tokens")
             else None
         )
+        self.oom_retries = 0
+        self._oom_notice_shown = False
 
     # -- lifecycle -------------------------------------------------------
     def load(self) -> None:
@@ -349,11 +359,22 @@ class HFCausalAdapter(ModelAdapter):
         except Exception as exc:  # noqa: BLE001
             if not self._is_oom(exc):
                 raise
+            self.oom_retries += 1
+            if not self._oom_notice_shown:
+                self._oom_notice_shown = True
+                print(
+                    "[jev] CUDA OOM while scoring; shrinking batches automatically. "
+                    "Lower --max-batch-tokens / --max-context-tokens to avoid it. "
+                    "(further OOMs are summarised at the end)",
+                    file=sys.stderr,
+                )
             torch = self._torch
             if torch is not None and torch.cuda.is_available():
                 torch.cuda.empty_cache()
             if len(indices) == 1:
                 raise
+            # Permanently back off the budget so later items stop hitting OOM.
+            self._max_batch_tokens = max(2048, self.max_batch_tokens // 2)
             mid = len(indices) // 2
             self._score_recursive(mem, indices[:mid], results)
             self._score_recursive(mem, indices[mid:], results)

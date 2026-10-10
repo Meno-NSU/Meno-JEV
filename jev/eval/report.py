@@ -47,6 +47,12 @@ def render_markdown(summary: Dict[str, Any]) -> str:
     lines.append(
         f"Macro accuracy by question type: {summary.get('macro_accuracy_by_type', 0.0):.4f}"
     )
+    if summary.get("oom_retries"):
+        lines.append(
+            f"\n> CUDA OOM retries during the run: {summary['oom_retries']} "
+            "(batches were shrunk automatically; lower `--max-batch-tokens` / "
+            "`--max-context-tokens` to avoid it)."
+        )
 
     lines.append("\n## By question type\n")
     lines.append("| type | n | accuracy | mean P(gold) | MRR | errors |")

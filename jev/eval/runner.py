@@ -182,4 +182,7 @@ def run(cfg: RunConfig, adapter=None) -> Dict[str, Any]:
     summary = summarize(preds, cfg=cfg)
     summary["predictions_path"] = str(pred_path)
     summary["run_name"] = run_name
+    oom_retries = int(getattr(adapter, "oom_retries", 0) or 0)
+    if oom_retries:
+        summary["oom_retries"] = oom_retries
     return summary

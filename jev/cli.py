@@ -150,6 +150,8 @@ def cmd_smoke(args) -> int:
         max_context_tokens=args.max_context_tokens,
         chat_template=_read_maybe_path(args.chat_template),
         attn_implementation=args.attn,
+        adapter_extra=({"max_batch_tokens": args.max_batch_tokens}
+                       if getattr(args, "max_batch_tokens", None) else {}),
     )
     summary = run_smoke(cfg)
     print(render_smoke(summary))
@@ -186,6 +188,8 @@ def _build_run_config(args):
         output_dir=args.output_dir,
         run_name=args.run_name,
         prompt=prompt,
+        adapter_extra=({"max_batch_tokens": args.max_batch_tokens}
+                       if getattr(args, "max_batch_tokens", None) else {}),
     )
 
 
@@ -239,6 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
     pk.add_argument("--max-context-tokens", type=int, default=None)
     pk.add_argument("--chat-template", default=None, help="path to a template file or literal")
     pk.add_argument("--attn", default=None)
+    pk.add_argument("--max-batch-tokens", type=int, default=None, help="token budget per forward batch")
     pk.set_defaults(func=cmd_smoke)
 
     pr = sub.add_parser("run", help="run the evaluation")
@@ -262,6 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--system-prompt", default=None)
     pr.add_argument("--answer-prefix", default=None)
     pr.add_argument("--state-fit", choices=["head", "tail", "head_tail", "none"], default="head_tail")
+    pr.add_argument("--max-batch-tokens", type=int, default=None, help="token budget per forward batch")
     pr.add_argument("--output-dir", default="outputs")
     pr.add_argument("--run-name", default=None)
     pr.set_defaults(func=cmd_run)

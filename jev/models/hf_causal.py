@@ -6,10 +6,23 @@ handled by subclasses in their own files; this file stays generic.
 
 ``torch`` and ``transformers`` are imported lazily so that the rest of the
 framework (and the test suite) works on machines without them.
+
+Memory
+------
+Scoring a candidate only needs the logits at the *last few* positions, not the
+full ``[batch, seq_len, vocab]`` tensor. Computing the full tensor is what blows
+up memory on long contexts (hundreds of candidates x long prompt x 150k vocab =
+tens of GB). We therefore:
+
+* ask the model for only the last ``max_continuation_len + 1`` logits via
+  ``logits_to_keep`` (``num_logits_to_keep`` on older transformers);
+* left-pad batches so those last positions stay aligned;
+* batch adaptively by a token budget and retry with smaller sub-batches on OOM.
 """
 
 from __future__ import annotations
 
+import inspect
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .base import ContinuationScore, ModelAdapter, ModelConfig, register_model
@@ -38,6 +51,8 @@ class HFCausalAdapter(ModelAdapter):
         self._tokenizer = None
         self._model = None
         self._device = None
+        self._logits_keep_arg: Optional[str] = None
+        self._max_batch_tokens = int(self.config.extra.get("max_batch_tokens", 8192))
 
     # -- lifecycle -------------------------------------------------------
     def load(self) -> None:
@@ -78,6 +93,19 @@ class HFCausalAdapter(ModelAdapter):
             self._device = getattr(self._model, "device", None)
 
         self._model.eval()
+        self._detect_logits_keep_arg()
+
+    def _detect_logits_keep_arg(self) -> None:
+        """Work out how to ask the model for only the last few logits."""
+        try:
+            params = inspect.signature(self._model.forward).parameters
+        except (TypeError, ValueError):
+            params = {}
+        for name in ("logits_to_keep", "num_logits_to_keep"):
+            if name in params:
+                self._logits_keep_arg = name
+                return
+        self._logits_keep_arg = None
 
     @property
     def tokenizer(self):
@@ -115,7 +143,6 @@ class HFCausalAdapter(ModelAdapter):
                 tokenize=False,
                 add_generation_prompt=add_generation_prompt,
             )
-        # Fallback for tokenizers without a chat template.
         parts = []
         for msg in messages:
             role = msg.get("role", "user")
@@ -130,121 +157,152 @@ class HFCausalAdapter(ModelAdapter):
         return "\n\n".join(parts) + (" " if add_generation_prompt else "")
 
     # -- internals -------------------------------------------------------
-    def _prepare_inputs(self, full_ids: List[int]):
-        """Truncate from the left if needed and move to a torch tensor."""
-        torch = self._torch
-        max_len = self.max_context_tokens
-        if len(full_ids) > max_len:
-            full_ids = full_ids[-max_len:]
-        input_ids = torch.tensor([full_ids], dtype=torch.long)
-        if self._device is not None:
-            input_ids = input_ids.to(self._device)
-        return input_ids
+    def _forward_logits(self, input_ids, attention_mask, position_ids, keep: int):
+        """Run the model, computing at most ``keep`` trailing logits.
 
-    def loglikelihood(self, context: str, continuation: str) -> ContinuationScore:
+        Returns a tensor ``[batch, block_len, vocab]`` whose positions are
+        aligned to the *right* end of each sequence.
+        """
         torch = self._torch
+        kwargs: Dict[str, object] = {}
+        if self._logits_keep_arg:
+            kwargs[self._logits_keep_arg] = keep
+        out = self._model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            **kwargs,
+        )
+        return out.logits
+
+    def _is_oom(self, exc: Exception) -> bool:
+        torch = self._torch
+        oom = getattr(torch.cuda, "OutOfMemoryError", None) if torch else None
+        if oom is not None and isinstance(exc, oom):
+            return True
+        return "out of memory" in str(exc).lower()
+
+    def _prep(self, context: str, continuation: str) -> Tuple[int, List[int], List[int]]:
+        """Return (ctx_len, cont_ids, full_ids) with the context trimmed to fit."""
+        max_len = self.max_context_tokens
         ctx_ids = self.encode(context, add_special_tokens=False)
         cont_ids = self.continuation_token_ids(context, continuation)
         if not cont_ids:
-            return ContinuationScore(0.0, 0, True)
+            return 0, [], []
+        if len(cont_ids) > max_len:
+            cont_ids = cont_ids[-max_len:]
+        keep_ctx = max(0, max_len - len(cont_ids))
+        ctx_ids = ctx_ids[-keep_ctx:] if keep_ctx else []
+        return len(ctx_ids), cont_ids, ctx_ids + cont_ids
 
-        full_ids = ctx_ids + cont_ids
-        max_len = self.max_context_tokens
-        if len(full_ids) > max_len:
-            # keep the continuation intact, drop context from the left
-            keep_ctx = max_len - len(cont_ids)
-            if keep_ctx <= 0:
-                cont_ids = cont_ids[-max_len:]
-                full_ids = cont_ids
-                ctx_len = 0
-            else:
-                ctx_ids = ctx_ids[-keep_ctx:]
-                full_ids = ctx_ids + cont_ids
-                ctx_len = len(ctx_ids)
-        else:
-            ctx_len = len(ctx_ids)
+    def _score_group(
+        self,
+        mem: List[Tuple[int, List[int], List[int]]],
+        indices: Sequence[int],
+        results: List[Optional[ContinuationScore]],
+    ) -> None:
+        torch = self._torch
+        seqs = [mem[i] for i in indices]
+        maxlen = max(len(s[2]) for s in seqs)
+        keep = max((len(s[1]) for s in seqs), default=1) + 1
 
-        input_ids = self._prepare_inputs(full_ids)
-        with torch.no_grad():
-            logits = self._model(input_ids=input_ids).logits[0]
+        pad_id = getattr(self._tokenizer, "pad_token_id", None)
+        if pad_id is None:
+            pad_id = getattr(self._tokenizer, "eos_token_id", None) or 0
 
+        input_ids = torch.full((len(seqs), maxlen), pad_id, dtype=torch.long)
+        attention = torch.zeros((len(seqs), maxlen), dtype=torch.long)
+        for row, (_clen, _cids, full_ids) in enumerate(seqs):
+            start = maxlen - len(full_ids)  # left padding
+            input_ids[row, start:] = torch.tensor(full_ids, dtype=torch.long)
+            attention[row, start:] = 1
+        # Left padding: positions must be computed from the real start.
+        position_ids = attention.cumsum(dim=1) - 1
+        position_ids.clamp_(min=0)
+        position_ids.masked_fill_(attention == 0, 0)
+
+        if self._device is not None:
+            input_ids = input_ids.to(self._device)
+            attention = attention.to(self._device)
+            position_ids = position_ids.to(self._device)
+
+        logits = self._forward_logits(input_ids, attention, position_ids, keep)
+        block_len = logits.shape[1]
         logprobs = torch.log_softmax(logits.float(), dim=-1)
-        total = 0.0
-        is_greedy = True
-        n_full = len(full_ids)
-        offset = n_full - len(cont_ids)
-        for j, tok in enumerate(cont_ids):
-            pos = offset + j
-            if pos < 1:
-                continue
-            step = logprobs[pos - 1]
-            total += float(step[tok].item())
-            if int(torch.argmax(step).item()) != tok:
-                is_greedy = False
-        return ContinuationScore(total, len(cont_ids), is_greedy)
 
-    # -- batched scoring -------------------------------------------------
+        for row, i in enumerate(indices):
+            _clen, cont_ids, _full = seqs[row]
+            n = len(cont_ids)
+            # Predictors for the continuation sit in the last n positions of the
+            # right-aligned block.
+            rel = logprobs[row, block_len - n - 1: block_len - 1]
+            total = 0.0
+            is_greedy = True
+            for j, tok in enumerate(cont_ids):
+                step = rel[j]
+                total += float(step[tok].item())
+                if int(torch.argmax(step).item()) != tok:
+                    is_greedy = False
+            results[i] = ContinuationScore(total, n, is_greedy)
+
+    def _score_recursive(
+        self,
+        mem: List[Tuple[int, List[int], List[int]]],
+        indices: Sequence[int],
+        results: List[Optional[ContinuationScore]],
+    ) -> None:
+        if not indices:
+            return
+        try:
+            self._score_group(mem, indices, results)
+        except Exception as exc:  # noqa: BLE001
+            if not self._is_oom(exc):
+                raise
+            torch = self._torch
+            if torch is not None and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if len(indices) == 1:
+                raise
+            mid = len(indices) // 2
+            self._score_recursive(mem, indices[:mid], results)
+            self._score_recursive(mem, indices[mid:], results)
+
+    def _group_by_budget(self, mem: List[Tuple[int, List[int], List[int]]]) -> List[List[int]]:
+        """Group sequence indices so each group fits the token budget."""
+        groups: List[List[int]] = []
+        current: List[int] = []
+        current_tokens = 0
+        for i, (_clen, _cids, full_ids) in enumerate(mem):
+            if not full_ids:
+                continue
+            length = len(full_ids)
+            if current and current_tokens + length > self._max_batch_tokens:
+                groups.append(current)
+                current = []
+                current_tokens = 0
+            current.append(i)
+            current_tokens += length
+        if current:
+            groups.append(current)
+        return groups
+
+    # -- main entry points ----------------------------------------------
     def loglikelihood_batch(
         self, pairs: Sequence[Tuple[str, str]]
     ) -> List[ContinuationScore]:
         if not pairs:
             return []
-        torch = self._torch
-        max_len = self.max_context_tokens
-        pad_id = getattr(self._tokenizer, "pad_token_id", None)
-        if pad_id is None:
-            pad_id = getattr(self._tokenizer, "eos_token_id", None) or 0
-
-        seqs = []  # (ctx_len, cont_ids, full_ids)
-        for context, continuation in pairs:
-            ctx_ids = self.encode(context, add_special_tokens=False)
-            cont_ids = self.continuation_token_ids(context, continuation)
+        mem = [self._prep(ctx, cont) for ctx, cont in pairs]
+        results: List[Optional[ContinuationScore]] = [None] * len(mem)
+        for i, (_clen, cont_ids, _full) in enumerate(mem):
             if not cont_ids:
-                seqs.append((0, [], []))
-                continue
-            if len(ctx_ids) + len(cont_ids) > max_len:
-                keep_ctx = max(0, max_len - len(cont_ids))
-                ctx_ids = ctx_ids[-keep_ctx:] if keep_ctx else []
-                if len(cont_ids) > max_len:
-                    cont_ids = cont_ids[-max_len:]
-            full_ids = ctx_ids + cont_ids
-            seqs.append((len(ctx_ids), cont_ids, full_ids))
+                results[i] = ContinuationScore(0.0, 0, True)
+        for group in self._group_by_budget(mem):
+            self._score_recursive(mem, group, results)
+        return [r if r is not None else ContinuationScore(0.0, 0, True) for r in results]
 
-        longest = max((len(s[2]) for s in seqs), default=1) or 1
-        batch = len(seqs)
-        input_ids = torch.full((batch, longest), pad_id, dtype=torch.long)
-        attention = torch.zeros((batch, longest), dtype=torch.long)
-        for i, (_clen, _cids, full_ids) in enumerate(seqs):
-            if not full_ids:
-                continue
-            input_ids[i, : len(full_ids)] = torch.tensor(full_ids, dtype=torch.long)
-            attention[i, : len(full_ids)] = 1
-        if self._device is not None:
-            input_ids = input_ids.to(self._device)
-            attention = attention.to(self._device)
-
-        with torch.no_grad():
-            logits = self._model(input_ids=input_ids, attention_mask=attention).logits
-
-        logprobs = torch.log_softmax(logits.float(), dim=-1)
-        results: List[ContinuationScore] = []
-        for i, (_clen, cont_ids, full_ids) in enumerate(seqs):
-            if not cont_ids:
-                results.append(ContinuationScore(0.0, 0, True))
-                continue
-            offset = len(full_ids) - len(cont_ids)
-            total = 0.0
-            is_greedy = True
-            for j, tok in enumerate(cont_ids):
-                pos = offset + j
-                if pos < 1:
-                    continue
-                step = logprobs[i, pos - 1]
-                total += float(step[tok].item())
-                if int(torch.argmax(step).item()) != tok:
-                    is_greedy = False
-            results.append(ContinuationScore(total, len(cont_ids), is_greedy))
-        return results
+    def loglikelihood(self, context: str, continuation: str) -> ContinuationScore:
+        return self.loglikelihood_batch([(context, continuation)])[0]
 
     # -- next-token mode -------------------------------------------------
     def next_token_logprobs(
@@ -252,14 +310,19 @@ class HFCausalAdapter(ModelAdapter):
     ) -> List[float]:
         torch = self._torch
         ctx_ids = self.encode(context, add_special_tokens=False)
-        input_ids = self._prepare_inputs(ctx_ids)
-        with torch.no_grad():
-            logits = self._model(input_ids=input_ids).logits[0, -1]
-        logprobs = torch.log_softmax(logits.float(), dim=-1)
+        max_len = self.max_context_tokens
+        if len(ctx_ids) > max_len:
+            ctx_ids = ctx_ids[-max_len:]
+        input_ids = torch.tensor([ctx_ids], dtype=torch.long)
+        attention = torch.ones_like(input_ids)
+        position_ids = torch.arange(len(ctx_ids), dtype=torch.long).unsqueeze(0)
+        if self._device is not None:
+            input_ids = input_ids.to(self._device)
+            attention = attention.to(self._device)
+            position_ids = position_ids.to(self._device)
+        logits = self._forward_logits(input_ids, attention, position_ids, keep=1)
+        step = torch.log_softmax(logits[0, -1].float(), dim=-1)
         out: List[float] = []
         for ids in token_ids:
-            if not ids:
-                out.append(float("-inf"))
-            else:
-                out.append(float(logprobs[ids[0]].item()))
+            out.append(float(step[ids[0]].item()) if ids else float("-inf"))
         return out

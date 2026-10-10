@@ -151,6 +151,7 @@ python -m jev.cli smoke --data benchmark.json --per-source-limit 1 \
 | `--device cuda` / `cpu` | force device (`auto` = all GPUs via `device_map`) |
 | `--attn sdpa` / `flash_attention_2` | attention implementation |
 | `--max-context-tokens N` | cap context for long states (see below) |
+| `--max-batch-tokens N` | token budget per forward batch (default 8192; lower it if you OOM) |
 | `--score-mode continuation` / `next_token` | scoring method |
 | `--normalize length` / `sum` / `none` | candidate log-prob normalisation |
 | `--state-fit head` / `tail` / `head_tail` / `none` | how long states are truncated |
@@ -188,7 +189,15 @@ export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 - **`git@github.com: ... Connection closed ... port 22`** → port 22 blocked; use
   `ssh://git@ssh.github.com:443/Meno-NSU/Meno-JEV.git` or HTTPS.
 - **CUDA out of memory** → smaller `--dtype bfloat16`, lower
-  `--max-context-tokens`, one GPU via `CUDA_VISIBLE_DEVICES=0`, or a smaller model.
+  `--max-context-tokens` and `--max-batch-tokens`, one GPU via
+  `CUDA_VISIBLE_DEVICES=0`, or a smaller model. The adapter only computes the
+  logits it needs and retries smaller sub-batches automatically, so OOM now
+  usually means a single very long sequence is too big for one forward.
+- **`causal_conv1d` / `flash-linear-attention` fallback warnings** on hybrid
+  models (e.g. Qwen3.5) are harmless — they only mean a slower reference kernel
+  is used. Install those packages for speed if desired.
+- **`CUDA error: unspecified launch failure` / `canUse32BitIndexMath`** →
+  usually a cascade after a prior OOM; fix memory first.
 - **Very long states** (some up to ~328k chars) → set `--max-context-tokens` and
   `--state-fit head_tail`; long states are cut into the context.
 - **`sentencepiece` build error** → `pip install sentencepiece` (some tokenizers

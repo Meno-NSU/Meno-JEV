@@ -79,6 +79,15 @@ python -m jev.cli smoke --data benchmark.json --per-source-limit 4
 # -> checks: 464  failed: 0 ... RESULT: OK   (exit 0; exit 1 if anything is off)
 ```
 
+By default `smoke` uses the `mock` adapter (no GPU/model needed) so it validates
+the harness itself. To smoke-test a **real** model (that it loads and scores on a
+few items), pass the same model flags as `run`:
+
+```bash
+python -m jev.cli smoke --data benchmark.json --per-source-limit 1 \
+    --adapter qwen --model-id /path/to/your-finetune
+```
+
 It is also a pytest: `tests/test_smoke.py` runs it against a tiny fixture always
 and against the real `benchmark.json` when the file is present (skipped otherwise).
 

@@ -39,6 +39,29 @@ class SmokeConfig:
     seed: int = 0
     prompt: PromptOptions = field(default_factory=PromptOptions)
 
+    # Model selection. Defaults to the dependency-free mock (no GPU needed);
+    # set adapter/model_id to smoke-test a real model instead.
+    adapter: str = "mock"
+    model_id: Optional[str] = None
+    device: Optional[str] = None
+    dtype: str = "auto"
+    max_context_tokens: Optional[int] = None
+    chat_template: Optional[str] = None
+    attn_implementation: Optional[str] = None
+    adapter_extra: Dict[str, Any] = field(default_factory=dict)
+
+    def model_config(self) -> ModelConfig:
+        return ModelConfig(
+            model_id=self.model_id,
+            device=self.device,
+            dtype=self.dtype,
+            max_context_tokens=self.max_context_tokens,
+            chat_template=self.chat_template,
+            attn_implementation=self.attn_implementation,
+            system_prompt=self.prompt.system_prompt,
+            extra=dict(self.adapter_extra),
+        )
+
 
 @dataclass
 class ItemCheck:
@@ -108,9 +131,10 @@ def check_item(item: Item, adapter, mode: str, options: PromptOptions) -> ItemCh
     return ItemCheck(item.id, item.source, item.question_type, mode, not issues, issues)
 
 
-def run_smoke(cfg: Optional[SmokeConfig] = None) -> Dict[str, Any]:
+def run_smoke(cfg: Optional[SmokeConfig] = None, adapter=None) -> Dict[str, Any]:
     cfg = cfg or SmokeConfig()
-    adapter = build_model("mock", ModelConfig(), load=True)
+    if adapter is None:
+        adapter = build_model(cfg.adapter, cfg.model_config(), load=True)
 
     by_source: "OrderedDict[str, List[Item]]" = OrderedDict()
     for item in iter_benchmark(cfg.data_path):
@@ -141,6 +165,8 @@ def run_smoke(cfg: Optional[SmokeConfig] = None) -> Dict[str, Any]:
 
     summary = {
         "data_path": str(cfg.data_path),
+        "adapter": cfg.adapter,
+        "model_id": cfg.model_id,
         "sources": len(by_source),
         "items_loaded": sum(len(v) for v in by_source.values()),
         "checks_run": len(checks),
@@ -162,6 +188,8 @@ def run_smoke(cfg: Optional[SmokeConfig] = None) -> Dict[str, Any]:
 def render_smoke(summary: Dict[str, Any]) -> str:
     lines = []
     lines.append("Meno-JEV smoke check")
+    model = summary.get("model_id") or "-"
+    lines.append(f"  adapter: {summary.get('adapter')}  model: {model}")
     lines.append(
         f"  data: {summary['data_path']}  sources: {summary['sources']}  "
         f"items: {summary['items_loaded']}"

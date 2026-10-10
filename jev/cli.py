@@ -81,6 +81,13 @@ def cmd_smoke(args) -> int:
         modes=modes,
         sample=args.sample,
         seed=args.seed,
+        adapter=args.adapter,
+        model_id=args.model_id,
+        device=args.device,
+        dtype=args.dtype,
+        max_context_tokens=args.max_context_tokens,
+        chat_template=_read_maybe_path(args.chat_template),
+        attn_implementation=args.attn,
     )
     summary = run_smoke(cfg)
     print(render_smoke(summary))
@@ -160,6 +167,13 @@ def build_parser() -> argparse.ArgumentParser:
     pk.add_argument("--modes", default="continuation,next_token")
     pk.add_argument("--sample", choices=["head", "random"], default="head")
     pk.add_argument("--seed", type=int, default=0)
+    pk.add_argument("--adapter", default="mock", help="mock (default), hf, qwen, ...")
+    pk.add_argument("--model-id", default=None, help="local path or HF hub id")
+    pk.add_argument("--device", default=None)
+    pk.add_argument("--dtype", default="auto")
+    pk.add_argument("--max-context-tokens", type=int, default=None)
+    pk.add_argument("--chat-template", default=None, help="path to a template file or literal")
+    pk.add_argument("--attn", default=None)
     pk.set_defaults(func=cmd_smoke)
 
     pr = sub.add_parser("run", help="run the evaluation")

@@ -15,7 +15,7 @@ except ImportError:  # tqdm is optional
         return iterable
 
 from ..data.loader import iter_benchmark
-from ..data.loader import filter_items
+from ..data.loader import filter_items, sample_items
 from ..models.base import ModelConfig, build_model
 from ..prompts.options import PromptOptions
 from ..scoring.modes import score
@@ -32,6 +32,8 @@ class RunConfig:
     splits: Optional[Sequence[str]] = None
     limit: Optional[int] = None
     per_source_limit: Optional[int] = None
+    sample: Optional[int] = None           # small stratified subsample size
+    seed: int = 0
 
     score_mode: Optional[str] = None       # override recipe's default
     normalize: str = "length"
@@ -96,7 +98,9 @@ def _select_items(cfg: RunConfig):
             if n < cfg.per_source_limit:
                 kept.append(it)
                 counts[it.source] = n + 1
-        items = kept
+            items = kept
+    if cfg.sample:
+        items = sample_items(items, cfg.sample, cfg.seed)
     if cfg.limit:
         items = items[: cfg.limit]
     return items

@@ -156,6 +156,8 @@ python -m jev.cli smoke --data benchmark.json --per-source-limit 1 \
 | `--normalize length` / `sum` / `none` | candidate log-prob normalisation |
 | `--state-fit head` / `tail` / `head_tail` / `none` | how long states are truncated |
 | `--sources a,b,c` `--types choice` `--split test` | filter the dataset |
+| `--sample N --seed 0` | small stratified subsample (quick prompt tuning) |
+| `--enable-thinking` | Qwen: keep thinking ON (default OFF, correct for loglikelihood) |
 
 ## Environment variables
 

@@ -94,6 +94,38 @@ python -m jev.cli smoke --data benchmark.json --per-source-limit 1 \
 It is also a pytest: `tests/test_smoke.py` runs it against a tiny fixture always
 and against the real `benchmark.json` when the file is present (skipped otherwise).
 
+## Quick eval (prompt tuning)
+
+Iterate on the prompt without running all ~11k items. `--sample N` draws a small,
+**reproducible, stratified** subsample: per-question-type counts follow the real
+mix (≈85% choice / 12% noul / 3% score) and items are spread round-robin across
+sources, so ~100 items still touch all sources.
+
+```bash
+python -m jev.cli run --data benchmark.json --adapter qwen \
+    --model-id /path/to/your-finetune \
+    --sample 100 --seed 0 \
+    --output-dir outputs --run-name tune-sample100
+# n=100, ~85 choice / 12 noul / 3 score, all 58 sources
+```
+
+Rotate the prompt with these flags (all also work on the full run):
+
+| flag | effect |
+| --- | --- |
+| `--system-prompt TEXT` | prepend a system message |
+| `--answer-prefix TEXT` | text inserted right before the scored continuation |
+| `--noul-words "true,false"` | binary words (`yes,no`, `1,0`, ...) |
+| `--no-label-options` | don't list options as `A. ...` |
+| `--no-lead-space` | don't prefix continuations with a space |
+| `--score-mode` / `--normalize` / `--temperature` | scoring knobs |
+| `--state-fit` / `--max-context-tokens` | how long states are truncated |
+
+> **Qwen thinking is OFF by default.** Qwen3/Qwen3.5 would otherwise open a
+> reasoning block right after the assistant turn, so the first scored token would
+> be reasoning instead of the answer. The `qwen` adapter renders the chat
+> template with `enable_thinking=False`. Pass `--enable-thinking` to keep it on.
+
 ## Scoring methods
 
 Two strategies, selectable with `--score-mode` (each recipe picks a sensible

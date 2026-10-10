@@ -183,11 +183,24 @@ def _build_run_config(args):
     from .eval.runner import RunConfig
     from .prompts.options import PromptOptions
 
+    noul_words = ("true", "false")
+    if getattr(args, "noul_words", None):
+        parts = [p.strip() for p in args.noul_words.split(",")]
+        if len(parts) == 2:
+            noul_words = (parts[0], parts[1])
     prompt = PromptOptions(
         system_prompt=args.system_prompt,
         answer_prefix=args.answer_prefix or "",
         state_fit=args.state_fit,
+        noul_words=noul_words,
+        label_options=not getattr(args, "no_label_options", False),
+        continuation_lead_space=not getattr(args, "no_lead_space", False),
     )
+    adapter_extra = {}
+    if getattr(args, "max_batch_tokens", None):
+        adapter_extra["max_batch_tokens"] = args.max_batch_tokens
+    if getattr(args, "enable_thinking", False):
+        adapter_extra["chat_template_kwargs"] = {"enable_thinking": True}
     return RunConfig(
         data_path=args.data,
         adapter=args.adapter,
@@ -197,6 +210,8 @@ def _build_run_config(args):
         splits=_csv(args.split),
         limit=args.limit,
         per_source_limit=args.per_source_limit,
+        sample=args.sample,
+        seed=args.seed,
         score_mode=args.score_mode,
         normalize=args.normalize,
         temperature=args.temperature,
@@ -209,8 +224,7 @@ def _build_run_config(args):
         output_dir=args.output_dir,
         run_name=args.run_name,
         prompt=prompt,
-        adapter_extra=({"max_batch_tokens": args.max_batch_tokens}
-                       if getattr(args, "max_batch_tokens", None) else {}),
+        adapter_extra=adapter_extra,
     )
 
 
@@ -276,6 +290,9 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--split", default=None, help="comma-separated splits (train,dev,test)")
     pr.add_argument("--limit", type=int, default=None)
     pr.add_argument("--per-source-limit", type=int, default=None)
+    pr.add_argument("--sample", type=int, default=None,
+                    help="draw a small stratified subsample of N items (quick eval)")
+    pr.add_argument("--seed", type=int, default=0, help="sampling seed")
     pr.add_argument("--score-mode", choices=["continuation", "next_token"], default=None)
     pr.add_argument("--normalize", choices=["length", "sum", "none"], default="length")
     pr.add_argument("--temperature", type=float, default=1.0)
@@ -287,6 +304,11 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--attn", default=None, help="attn_implementation (e.g. sdpa, flash_attention_2)")
     pr.add_argument("--system-prompt", default=None)
     pr.add_argument("--answer-prefix", default=None)
+    pr.add_argument("--noul-words", default=None, help="binary answer words, e.g. 'true,false' or 'yes,no'")
+    pr.add_argument("--no-label-options", action="store_true", help="do not letter-label options A/B/C")
+    pr.add_argument("--no-lead-space", action="store_true", help="do not prefix continuations with a space")
+    pr.add_argument("--enable-thinking", action="store_true",
+                    help="Qwen: keep thinking mode ON (default: OFF)")
     pr.add_argument("--state-fit", choices=["head", "tail", "head_tail", "none"], default="head_tail")
     pr.add_argument("--max-batch-tokens", type=int, default=None, help="token budget per forward batch")
     pr.add_argument("--output-dir", default="outputs")

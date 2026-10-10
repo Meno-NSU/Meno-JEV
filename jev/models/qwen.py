@@ -26,6 +26,12 @@ class QwenAdapter(HFCausalAdapter):
     """HuggingFace causal adapter with Qwen-specific defaults."""
 
     def load(self) -> None:
+        # Qwen3 / Qwen3.5 default to *thinking* mode, whose chat template opens
+        # a reasoning block right after the assistant turn. That makes the first
+        # continuation token a reasoning token instead of the answer and corrupts
+        # the loglikelihood distribution. Disable it unless the caller asked
+        # otherwise (config.extra["chat_template_kwargs"]["enable_thinking"]).
+        self.config.extra.setdefault("chat_template_kwargs", {"enable_thinking": False})
         super().load()
         tok = self._tokenizer
         # Qwen tokenizers normally have no pad token; batching needs one.

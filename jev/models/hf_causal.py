@@ -190,12 +190,22 @@ class HFCausalAdapter(ModelAdapter):
         self, messages: Sequence[Dict[str, str]], add_generation_prompt: bool = True
     ) -> str:
         tok = self._tokenizer
+        template_kwargs = dict(self.config.extra.get("chat_template_kwargs", {}) or {})
         if getattr(tok, "chat_template", None):
-            return tok.apply_chat_template(
-                list(messages),
-                tokenize=False,
-                add_generation_prompt=add_generation_prompt,
-            )
+            try:
+                return tok.apply_chat_template(
+                    list(messages),
+                    tokenize=False,
+                    add_generation_prompt=add_generation_prompt,
+                    **template_kwargs,
+                )
+            except TypeError:
+                # Older templates don't accept the extra kwargs.
+                return tok.apply_chat_template(
+                    list(messages),
+                    tokenize=False,
+                    add_generation_prompt=add_generation_prompt,
+                )
         parts = []
         for msg in messages:
             role = msg.get("role", "user")

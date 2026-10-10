@@ -1,0 +1,9 @@
+# Core (always needed)
+numpy>=1.23
+tqdm>=4.64
+
+# Inference backend (install on the cluster; not required for mock/testing)
+# torch>=2.0
+# transformers>=4.40
+# accelerate>=0.27
+# sentencepiece

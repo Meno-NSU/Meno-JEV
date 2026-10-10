@@ -1,0 +1,35 @@
+# Data (large; keep out of git — provide --data path instead)
+benchmark.json
+data/*.json
+data/*.jsonl
+
+# Outputs / checkpoints
+outputs/
+runs/
+*.predictions.jsonl
+*.report.json
+*.report.md
+*.report.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# HF caches
+.cache/
+cache/
+*.safetensors
+*.bin
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

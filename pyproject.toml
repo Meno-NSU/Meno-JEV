@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "menoj"
+version = "0.1.0"
+description = "Loglikelihood (JEV-style) evaluator: score candidate answers with an LLM instead of generating."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Meno-NSU" }]
+dependencies = [
+    "tqdm>=4.64",
+]
+
+[project.optional-dependencies]
+hf = [
+    "torch>=2.0",
+    "transformers>=4.40",
+    "accelerate>=0.27",
+    "sentencepiece",
+]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+menoj = "jev.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["jev*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

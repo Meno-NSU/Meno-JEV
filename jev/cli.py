@@ -62,6 +62,20 @@ def cmd_doctor(_args) -> int:
     print(f"  sentencepiece: {_try('sentencepiece')}")
     print(f"  tqdm: {_try('tqdm')}")
 
+    # Probe the actual model import (top-level `transformers` can import fine
+    # while `AutoModelForCausalLM` fails, e.g. no visible GPU on torch 2.6).
+    try:
+        import torch  # noqa: F401
+
+        from .models.hf_causal import _shim_torch_accelerator
+
+        _shim_torch_accelerator(torch)
+        from transformers import AutoModelForCausalLM  # noqa: F401
+
+        print("  transformers model import: ok")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  transformers model import: FAILED ({type(exc).__name__}: {exc})")
+
     try:
         import torch
 

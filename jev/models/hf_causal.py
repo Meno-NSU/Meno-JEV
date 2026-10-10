@@ -28,6 +28,34 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from .base import ContinuationScore, ModelAdapter, ModelConfig, register_model
 
 
+def _shim_torch_accelerator(torch) -> None:
+    """Make ``torch.accelerator.current_accelerator`` return ``None`` instead of
+    raising when no accelerator is present.
+
+    Newer transformers call this at import time (indirectly, via
+    ``get_device_type``); on a machine with no visible GPU it raises
+    ``RuntimeError: Cannot access accelerator device when none is available``
+    and breaks ``from transformers import AutoModelForCausalLM``. Returning
+    ``None`` matches the intended "no accelerator" semantics and lets CPU runs
+    work. A present GPU is unaffected (the original result is returned).
+    """
+    accelerator = getattr(torch, "accelerator", None)
+    if accelerator is None:
+        return
+    original = getattr(accelerator, "current_accelerator", None)
+    if original is None or getattr(original, "_jev_safe", False):
+        return
+
+    def safe_current_accelerator(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except Exception:  # noqa: BLE001
+            return None
+
+    safe_current_accelerator._jev_safe = True  # type: ignore[attr-defined]
+    accelerator.current_accelerator = safe_current_accelerator
+
+
 def _resolve_torch_dtype(torch, name: str):
     if name in (None, "auto"):
         return "auto"
@@ -63,6 +91,9 @@ class HFCausalAdapter(ModelAdapter):
                 "PyTorch is not installed in this environment. Install the [hf] "
                 "extra (see SETUP.md step 3-4)."
             ) from exc
+
+        # Guard against the transformers import crashing when no GPU is visible.
+        _shim_torch_accelerator(torch)
 
         try:
             from transformers import AutoModelForCausalLM, AutoTokenizer

@@ -51,8 +51,10 @@ def cmd_doctor(_args) -> int:
         try:
             mod = __import__(name)
             return getattr(mod, "__version__", "?")
+        except ModuleNotFoundError:
+            return "NOT INSTALLED"
         except Exception as exc:  # noqa: BLE001
-            return f"NOT INSTALLED ({type(exc).__name__})"
+            return f"IMPORT ERROR ({type(exc).__name__}: {exc})"
 
     print(f"  torch: {_try('torch')}")
     print(f"  transformers: {_try('transformers')}")
@@ -63,12 +65,17 @@ def cmd_doctor(_args) -> int:
     try:
         import torch
 
-        print(f"  cuda available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
+        avail = torch.cuda.is_available()
+        print(f"  cuda available: {avail}")
+        if avail:
             print(f"  cuda version: {torch.version.cuda}")
             print(f"  gpu count: {torch.cuda.device_count()}")
             for i in range(torch.cuda.device_count()):
                 print(f"    [{i}] {torch.cuda.get_device_name(i)}")
+        else:
+            print("  note: no GPU visible to torch; set a valid CUDA_VISIBLE_DEVICES "
+                  "if you expected one (a torch/transformers version mismatch can "
+                  "also break the transformers import when no accelerator is present)")
     except Exception:  # noqa: BLE001
         print("  cuda available: unknown (torch not installed)")
 

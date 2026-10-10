@@ -56,8 +56,30 @@ class HFCausalAdapter(ModelAdapter):
 
     # -- lifecycle -------------------------------------------------------
     def load(self) -> None:
-        import torch  # noqa: F401
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        try:
+            import torch  # noqa: F401
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                "PyTorch is not installed in this environment. Install the [hf] "
+                "extra (see SETUP.md step 3-4)."
+            ) from exc
+
+        try:
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                "Failed to import transformers (this happens before any Meno-JEV "
+                "code runs, so it is an environment problem, not a Meno-JEV bug).\n"
+                f"Underlying error: {type(exc).__name__}: {exc}\n"
+                "Common causes and fixes:\n"
+                "  * 'Cannot access accelerator device when none is available' -> "
+                "this process sees no GPU. Check `nvidia-smi` and $CUDA_VISIBLE_DEVICES; "
+                "if you meant to use the GPU, make it visible (e.g. "
+                "CUDA_VISIBLE_DEVICES=0) or don't set it to an empty/invalid value. "
+                "A torch/transformers version mismatch can also trigger this: "
+                "`pip install -U torch transformers`.\n"
+                "  * otherwise run `python -m jev.cli doctor` to inspect the env."
+            ) from exc
 
         self._torch = torch
         cfg = self.config

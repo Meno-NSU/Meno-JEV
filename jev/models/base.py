@@ -135,9 +135,15 @@ class ModelAdapter(ABC):
         and stripping the context prefix, so the returned ids exactly match what
         the model would see.
         """
+        if not continuation:
+            return []
         ctx_ids = self.encode(context, add_special_tokens=False)
         full_ids = self.encode(context + continuation, add_special_tokens=False)
-        return full_ids[len(ctx_ids):]
+        if full_ids[: len(ctx_ids)] == ctx_ids:
+            return full_ids[len(ctx_ids):]
+        # The tokenizer merged characters across the boundary; encode the
+        # continuation on its own as a safe fallback.
+        return self.encode(continuation, add_special_tokens=False)
 
 
 # ---------------------------------------------------------------------------

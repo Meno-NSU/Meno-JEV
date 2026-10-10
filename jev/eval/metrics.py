@@ -50,6 +50,12 @@ def summarize(preds: List, cfg: Optional[object] = None) -> Dict[str, Any]:
         sum(v["accuracy"] for v in by_type.values()) / len(by_type) if by_type else 0.0
     )
 
+    errors = [p for p in preds if getattr(p, "error", None)]
+    error_types: DefaultDict[str, int] = defaultdict(int)
+    for p in errors:
+        msg = p.error or ""
+        error_types[msg.split(":", 1)[0].strip()] += 1
+
     summary = {
         "overall": overall,
         "macro_accuracy_by_type": macro,
@@ -57,6 +63,18 @@ def summarize(preds: List, cfg: Optional[object] = None) -> Dict[str, Any]:
         "by_source": by_source,
         "by_split": by_split,
         "per_type_counts": per_type_n,
+        "error_count": len(errors),
+        "error_types": dict(error_types),
+        "error_details": [
+            {
+                "id": p.id,
+                "source": p.source,
+                "question_type": p.question_type,
+                "mode": p.score_mode,
+                "error": p.error,
+            }
+            for p in errors[:50]
+        ],
     }
     if cfg is not None:
         summary["config"] = {

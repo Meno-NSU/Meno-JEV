@@ -1,0 +1,10 @@
+# Real-model backend (decoder-only causal LMs via HuggingFace).
+# Install AFTER choosing the right torch build for your CUDA (see SETUP.md):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+# Then:
+#   pip install -r requirements-hf.txt
+
+torch>=2.0
+transformers>=4.40
+accelerate>=0.27
+sentencepiece

@@ -33,6 +33,68 @@ def cmd_models(_args) -> int:
     return 0
 
 
+def cmd_doctor(_args) -> int:
+    import platform
+    import sys
+
+    print("Meno-JEV environment doctor")
+    print(f"  python: {sys.version.split()[0]}  ({platform.system()} {platform.machine()})")
+    print(f"  executable: {sys.executable}")
+    try:
+        from . import __version__ as jev_version
+
+        print(f"  menoj: {jev_version}")
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _try(name):
+        try:
+            mod = __import__(name)
+            return getattr(mod, "__version__", "?")
+        except Exception as exc:  # noqa: BLE001
+            return f"NOT INSTALLED ({type(exc).__name__})"
+
+    print(f"  torch: {_try('torch')}")
+    print(f"  transformers: {_try('transformers')}")
+    print(f"  accelerate: {_try('accelerate')}")
+    print(f"  sentencepiece: {_try('sentencepiece')}")
+    print(f"  tqdm: {_try('tqdm')}")
+
+    try:
+        import torch
+
+        print(f"  cuda available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"  cuda version: {torch.version.cuda}")
+            print(f"  gpu count: {torch.cuda.device_count()}")
+            for i in range(torch.cuda.device_count()):
+                print(f"    [{i}] {torch.cuda.get_device_name(i)}")
+    except Exception:  # noqa: BLE001
+        print("  cuda available: unknown (torch not installed)")
+
+    import os
+
+    for var in ("HF_HOME", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "CUDA_VISIBLE_DEVICES", "HF_TOKEN"):
+        val = os.environ.get(var)
+        if val and var == "HF_TOKEN":
+            val = "set (hidden)"
+        print(f"  {var}={val}")
+
+    from .models.base import available_models
+
+    print(f"  model adapters: {', '.join(available_models())}")
+
+    try:
+        import torch  # noqa: F401
+
+        ready = True
+    except Exception:  # noqa: BLE001
+        ready = False
+    print("  status: " + ("ready for real models" if ready else
+                          "core OK; install the [hf] extra to run real models"))
+    return 0
+
+
 def cmd_sources(args) -> int:
     from .data.loader import iter_benchmark
     from collections import Counter, defaultdict
@@ -149,6 +211,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     pm = sub.add_parser("models", help="list available model adapters")
     pm.set_defaults(func=cmd_models)
+
+    pd = sub.add_parser("doctor", help="show the environment (python, torch, CUDA, env vars)")
+    pd.set_defaults(func=cmd_doctor)
 
     ps = sub.add_parser("sources", help="list sources in the dataset")
     ps.add_argument("--data", default="benchmark.json")

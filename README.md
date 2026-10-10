@@ -20,16 +20,19 @@ softmax over candidates  ──►  distribution  ──►  prediction + metric
 
 ## Install
 
-```bash
-pip install -e .                 # core (no torch needed; works with the mock)
-pip install -e ".[hf]"           # + torch/transformers for real models
-```
-
-On the cluster (real model):
+Full step-by-step (venv/conda, CUDA-matched torch, HF cache/offline, env vars,
+troubleshooting) is in **[SETUP.md](SETUP.md)**. The short version:
 
 ```bash
-pip install torch transformers accelerate sentencepiece
+bash scripts/setup_env.sh                 # core (no torch; runs the mock)
+WITH_HF=1 bash scripts/setup_env.sh       # + torch/transformers for real models
+source .venv/bin/activate
+
+python -m jev.cli doctor                  # verify the environment
 ```
+
+Manual: `pip install -e .` (core) and `pip install -e ".[hf]"` after installing
+the torch build that matches your CUDA (see SETUP.md §3).
 
 ## Quick start
 

@@ -119,6 +119,7 @@ Rotate the prompt with these flags (all also work on the full run):
 | `--no-label-options` | don't list options as `A. ...` |
 | `--no-lead-space` | don't prefix continuations with a space |
 | `--score-mode` / `--normalize` / `--temperature` | scoring knobs |
+| `--max-batch-tokens` / `--batch-size` | forward batching (default auto from GPU memory) |
 | `--state-fit` / `--max-context-tokens` | how long states are truncated |
 
 > **Qwen thinking is OFF by default.** Qwen3/Qwen3.5 would otherwise open a

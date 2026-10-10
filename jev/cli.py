@@ -215,6 +215,7 @@ def _build_run_config(args):
         score_mode=args.score_mode,
         normalize=args.normalize,
         temperature=args.temperature,
+        batch_size=args.batch_size,
         top_k=args.top_k,
         device=args.device,
         dtype=args.dtype,
@@ -278,7 +279,7 @@ def build_parser() -> argparse.ArgumentParser:
     pk.add_argument("--max-context-tokens", type=int, default=None)
     pk.add_argument("--chat-template", default=None, help="path to a template file or literal")
     pk.add_argument("--attn", default=None)
-    pk.add_argument("--max-batch-tokens", type=int, default=None, help="token budget per forward batch")
+    pk.add_argument("--max-batch-tokens", type=int, default=None, help="tokens per forward pass (default: auto from GPU memory)")
     pk.set_defaults(func=cmd_smoke)
 
     pr = sub.add_parser("run", help="run the evaluation")
@@ -296,6 +297,8 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--score-mode", choices=["continuation", "next_token"], default=None)
     pr.add_argument("--normalize", choices=["length", "sum", "none"], default="length")
     pr.add_argument("--temperature", type=float, default=1.0)
+    pr.add_argument("--batch-size", type=int, default=None,
+                    help="candidates scored per call (default: auto by token budget)")
     pr.add_argument("--top-k", type=int, default=5)
     pr.add_argument("--device", default=None)
     pr.add_argument("--dtype", default="auto")
@@ -310,7 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--enable-thinking", action="store_true",
                     help="Qwen: keep thinking mode ON (default: OFF)")
     pr.add_argument("--state-fit", choices=["head", "tail", "head_tail", "none"], default="head_tail")
-    pr.add_argument("--max-batch-tokens", type=int, default=None, help="token budget per forward batch")
+    pr.add_argument("--max-batch-tokens", type=int, default=None, help="tokens per forward pass (default: auto from GPU memory)")
     pr.add_argument("--output-dir", default="outputs")
     pr.add_argument("--run-name", default=None)
     pr.set_defaults(func=cmd_run)

@@ -151,7 +151,8 @@ python -m jev.cli smoke --data benchmark.json --per-source-limit 1 \
 | `--device cuda` / `cpu` | force device (`auto` = all GPUs via `device_map`) |
 | `--attn sdpa` / `flash_attention_2` | attention implementation |
 | `--max-context-tokens N` | cap context for long states (see below) |
-| `--max-batch-tokens N` | token budget per forward batch (default 8192; lower it if you OOM) |
+| `--max-batch-tokens N` | tokens per forward pass (default: auto from GPU memory; lower if you OOM) |
+| `--batch-size N` | candidates scored per call (default: auto by token budget) |
 | `--score-mode continuation` / `next_token` | scoring method |
 | `--normalize length` / `sum` / `none` | candidate log-prob normalisation |
 | `--state-fit head` / `tail` / `head_tail` / `none` | how long states are truncated |

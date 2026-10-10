@@ -38,6 +38,7 @@ class RunConfig:
     score_mode: Optional[str] = None       # override recipe's default
     normalize: str = "length"
     temperature: float = 1.0
+    batch_size: Optional[int] = None       # candidates per call (None = adapter-managed)
     top_k: int = 5
 
     device: Optional[str] = None
@@ -141,6 +142,7 @@ def run(cfg: RunConfig, adapter=None) -> Dict[str, Any]:
                     mode=rq.score_mode,
                     normalize=cfg.normalize,
                     temperature=cfg.temperature,
+                    batch_size=cfg.batch_size,
                 )
                 pred_id = dist.argmax_id()
                 if item.gold_id not in dist.ids:

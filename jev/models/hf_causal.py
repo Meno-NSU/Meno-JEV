@@ -80,7 +80,12 @@ class HFCausalAdapter(ModelAdapter):
         self._model = None
         self._device = None
         self._logits_keep_arg: Optional[str] = None
-        self._max_batch_tokens = int(self.config.extra.get("max_batch_tokens", 8192))
+        # None -> pick automatically from GPU memory after load().
+        self._max_batch_tokens: Optional[int] = (
+            int(self.config.extra["max_batch_tokens"])
+            if self.config.extra.get("max_batch_tokens")
+            else None
+        )
 
     # -- lifecycle -------------------------------------------------------
     def load(self) -> None:
@@ -147,6 +152,29 @@ class HFCausalAdapter(ModelAdapter):
 
         self._model.eval()
         self._detect_logits_keep_arg()
+        if self._max_batch_tokens is None:
+            self._max_batch_tokens = self._auto_max_batch_tokens()
+
+    def _auto_max_batch_tokens(self) -> int:
+        """Choose a per-forward token budget from the visible GPU memory.
+
+        With the logits-truncation optimisation, peak memory is dominated by
+        activations (roughly proportional to #tokens), not by the logits tensor,
+        so a large-memory GPU can safely batch far more than the old 8192.
+        """
+        torch = self._torch
+        try:
+            if torch is not None and torch.cuda.is_available():
+                total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                # ~512 tokens per GB of VRAM, clamped to a sane range.
+                return int(max(8192, min(65536, total_gb * 512)))
+        except Exception:  # noqa: BLE001
+            pass
+        return 8192
+
+    @property
+    def max_batch_tokens(self) -> int:
+        return int(self._max_batch_tokens or 8192)
 
     def _detect_logits_keep_arg(self) -> None:
         """Work out how to ask the model for only the last few logits."""
@@ -339,7 +367,7 @@ class HFCausalAdapter(ModelAdapter):
             if not full_ids:
                 continue
             length = len(full_ids)
-            if current and current_tokens + length > self._max_batch_tokens:
+            if current and current_tokens + length > self.max_batch_tokens:
                 groups.append(current)
                 current = []
                 current_tokens = 0

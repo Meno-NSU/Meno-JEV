@@ -39,8 +39,15 @@ def score_continuation(
     candidates: Sequence[Candidate],
     normalize: str = "length",
     temperature: float = 1.0,
-    batch_size: int = 64,
+    batch_size: Optional[int] = None,
 ) -> Distribution:
+    """Score every candidate as a continuation of ``context``.
+
+    ``batch_size`` caps how many candidates go into one ``loglikelihood_batch``
+    call. ``None`` (default) passes all candidates at once and lets the model
+    adapter do memory-aware batching internally (recommended: the adapter knows
+    the token budget and can retry on OOM).
+    """
     ids = [c.id for c in candidates]
     if not candidates:
         return Distribution([], [], [])
@@ -49,9 +56,12 @@ def score_continuation(
     scores: List[float] = []
     meta_scores: List[float] = []
 
-    for start in range(0, len(pairs), max(batch_size, 1)):
-        chunk = pairs[start : start + batch_size]
-        for (ctx, cont), cs in zip(chunk, adapter.loglikelihood_batch(chunk)):
+    if batch_size and batch_size > 0:
+        chunks = [pairs[i : i + batch_size] for i in range(0, len(pairs), batch_size)]
+    else:
+        chunks = [pairs]
+    for chunk in chunks:
+        for cs in adapter.loglikelihood_batch(chunk):
             scores.append(_normalize(cs.logprob, cs.num_tokens, normalize))
             meta_scores.append(cs.logprob)
 
@@ -83,7 +93,7 @@ def score(
     mode: str = "continuation",
     normalize: str = "length",
     temperature: float = 1.0,
-    batch_size: int = 64,
+    batch_size: Optional[int] = None,
 ) -> Distribution:
     if mode == "next_token":
         return score_next_token(adapter, context, candidates, temperature)

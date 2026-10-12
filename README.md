@@ -63,6 +63,11 @@ Outputs (per run) land in `outputs/`:
 - `<run>.report.json` - full summary (overall / by type / by source / by split).
 - `<run>.report.md` - readable accuracy table.
 
+Items that fail (e.g. CUDA OOM) are **excluded** from accuracy / mean P(gold) /
+MRR — an infrastructure failure is not a wrong answer. The report shows `n`,
+`scored` and `errors` per group (and an `## Errors` section), so coverage stays
+visible. Accuracy is always over the **scored** items.
+
 `benchmark.json` is intentionally **not** committed (113 MB); pass `--data`.
 
 ## Smoke check

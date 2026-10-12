@@ -16,12 +16,13 @@ def write_json(summary: Dict[str, Any], path) -> Path:
 
 def _row(name: str, m: Dict[str, Any]) -> str:
     if not m or m.get("n", 0) == 0:
-        return f"| {name} | 0 | - | - | - | - |"
+        return f"| {name} | 0 | 0 | - | - | - | 0 |"
     err = m.get("errors", 0)
-    return (
-        f"| {name} | {m['n']} | {m['accuracy']:.4f} | "
-        f"{m.get('mean_prob_gold', 0.0):.4f} | {m.get('mrr', 0.0):.4f} | {err} |"
-    )
+    scored = m.get("scored", m.get("n", 0) - err)
+    acc = f"{m['accuracy']:.4f}" if scored else "-"
+    mp = f"{m.get('mean_prob_gold', 0.0):.4f}" if scored else "-"
+    mrr = f"{m.get('mrr', 0.0):.4f}" if scored else "-"
+    return f"| {name} | {m['n']} | {scored} | {acc} | {mp} | {mrr} | {err} |"
 
 
 def render_markdown(summary: Dict[str, Any]) -> str:
@@ -39,10 +40,16 @@ def render_markdown(summary: Dict[str, Any]) -> str:
             f"- score_mode: `{mode}`  normalize: `{cfg.get('normalize')}`"
             f"  temperature: `{cfg.get('temperature')}`"
         )
+    ov = summary["overall"]
     lines.append("")
     lines.append(
-        f"**Overall accuracy: {summary['overall'].get('accuracy', 0.0):.4f} "
-        f"(n={summary['overall'].get('n', 0)})**"
+        f"**Overall accuracy: {ov.get('accuracy', 0.0):.4f}** "
+        f"(scored={ov.get('scored', ov.get('n', 0))}, n={ov.get('n', 0)}, "
+        f"errors={ov.get('errors', 0)})"
+    )
+    lines.append(
+        "Accuracy / mean P(gold) / MRR are computed over **scored** items only; "
+        "failed items (errors) are excluded, not counted as wrong."
     )
     lines.append(
         f"Macro accuracy by question type: {summary.get('macro_accuracy_by_type', 0.0):.4f}"
@@ -55,14 +62,14 @@ def render_markdown(summary: Dict[str, Any]) -> str:
         )
 
     lines.append("\n## By question type\n")
-    lines.append("| type | n | accuracy | mean P(gold) | MRR | errors |")
-    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+    lines.append("| type | n | scored | accuracy | mean P(gold) | MRR | errors |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
     for k in sorted(summary.get("by_question_type", {})):
         lines.append(_row(k, summary["by_question_type"][k]))
 
     lines.append("\n## By source\n")
-    lines.append("| source | n | accuracy | mean P(gold) | MRR | errors |")
-    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+    lines.append("| source | n | scored | accuracy | mean P(gold) | MRR | errors |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
     for k in sorted(summary.get("by_source", {})):
         lines.append(_row(k, summary["by_source"][k]))
 
@@ -77,8 +84,10 @@ def _errors_section(summary: Dict[str, Any]) -> list:
         lines.append("None.")
         return lines
     lines.append(
-        f"**{n_err} item(s) failed** — these count as wrong (accuracy 0, "
-        "mean P(gold) 0, MRR 0), so they drag the averages down."
+        f"**{n_err} item(s) failed** (mostly CUDA OOM). These are excluded from "
+        "accuracy / mean P(gold) / MRR — they are infrastructure failures, not "
+        "wrong model answers. The `scored` column shows how many items each group "
+        "actually used."
     )
     types = summary.get("error_types") or {}
     if types:

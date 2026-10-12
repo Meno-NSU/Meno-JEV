@@ -20,23 +20,42 @@ def _group(preds: List, key):
 
 
 def _bucket_metrics(preds: List) -> Dict[str, Any]:
+    """Metrics for a group of predictions.
+
+    Items that raised (``error`` set, e.g. an OOM) are **excluded** from the
+    accuracy / mean-probability / MRR denominators: an infrastructure failure is
+    not a wrong model answer. They are reported separately as ``errors`` so the
+    coverage stays visible.
+    """
     n = len(preds)
     if n == 0:
-        return {"n": 0}
-    correct = sum(1 for p in preds if p.correct)
-    probs = [p.prob_gold for p in preds]
-    ranks = [p.rank_gold for p in preds if p.rank_gold]
-    mrr = (
-        sum(1.0 / r for r in ranks) / len(ranks) if ranks else 0.0
-    )
-    errs = sum(1 for p in preds if p.error)
-    return {
+        return {"n": 0, "scored": 0, "errors": 0, "coverage": 0.0}
+
+    ok = [p for p in preds if not getattr(p, "error", None)]
+    scored = len(ok)
+    errors = n - scored
+    base = {
         "n": n,
-        "accuracy": correct / n,
-        "mean_prob_gold": sum(probs) / n,
-        "mrr": mrr,
-        "errors": errs,
+        "scored": scored,
+        "errors": errors,
+        "coverage": (scored / n) if n else 0.0,
     }
+    if scored == 0:
+        base.update({"accuracy": 0.0, "mean_prob_gold": 0.0, "mrr": 0.0})
+        return base
+
+    correct = sum(1 for p in ok if p.correct)
+    probs = [p.prob_gold for p in ok]
+    ranks = [p.rank_gold for p in ok if p.rank_gold]
+    mrr = sum(1.0 / r for r in ranks) / len(ranks) if ranks else 0.0
+    base.update(
+        {
+            "accuracy": correct / scored,
+            "mean_prob_gold": sum(probs) / scored,
+            "mrr": mrr,
+        }
+    )
+    return base
 
 
 def summarize(preds: List, cfg: Optional[object] = None) -> Dict[str, Any]:
@@ -46,8 +65,12 @@ def summarize(preds: List, cfg: Optional[object] = None) -> Dict[str, Any]:
     by_split = {k: _bucket_metrics(v) for k, v in _group(preds, lambda p: p.split).items()}
 
     per_type_n = {k: v["n"] for k, v in by_type.items()}
+    # Macro over types that actually produced scored items (ignore fully-errored).
+    scored_types = [v for v in by_type.values() if v.get("scored", 0) > 0]
     macro = (
-        sum(v["accuracy"] for v in by_type.values()) / len(by_type) if by_type else 0.0
+        sum(v["accuracy"] for v in scored_types) / len(scored_types)
+        if scored_types
+        else 0.0
     )
 
     errors = [p for p in preds if getattr(p, "error", None)]

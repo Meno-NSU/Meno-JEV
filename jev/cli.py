@@ -245,6 +245,26 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_report(args) -> int:
+    from .eval.report import report_from_predictions, render_markdown
+
+    config = None
+    if args.adapter or args.model_id or args.score_mode:
+        config = {
+            "adapter": args.adapter,
+            "model_id": args.model_id,
+            "score_mode": args.score_mode,
+            "normalize": None,
+            "temperature": None,
+        }
+    summary = report_from_predictions(
+        args.predictions, output_dir=args.output_dir,
+        run_name=args.run_name, config=config,
+    )
+    print(render_markdown(summary))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="menoj", description="Loglikelihood JEV evaluator")
     sub = p.add_subparsers(dest="command", required=True)
@@ -281,6 +301,15 @@ def build_parser() -> argparse.ArgumentParser:
     pk.add_argument("--attn", default=None)
     pk.add_argument("--max-batch-tokens", type=int, default=None, help="tokens per forward pass (default: auto from GPU memory)")
     pk.set_defaults(func=cmd_smoke)
+
+    prep = sub.add_parser("report", help="(re)compute metrics from a saved predictions.jsonl")
+    prep.add_argument("predictions", help="path to a *.predictions.jsonl file")
+    prep.add_argument("--output-dir", default=None, help="where to write the report (default: alongside predictions)")
+    prep.add_argument("--run-name", default=None)
+    prep.add_argument("--adapter", default=None)
+    prep.add_argument("--model-id", default=None)
+    prep.add_argument("--score-mode", default=None)
+    prep.set_defaults(func=cmd_report)
 
     pr = sub.add_parser("run", help="run the evaluation")
     pr.add_argument("--data", default="benchmark.json")

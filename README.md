@@ -132,6 +132,20 @@ Rotate the prompt with these flags (all also work on the full run):
 > be reasoning instead of the answer. The `qwen` adapter renders the chat
 > template with `enable_thinking=False`. Pass `--enable-thinking` to keep it on.
 
+## Recompute metrics without re-running
+
+Every prediction is saved, so metrics can be recomputed from an existing run —
+useful after a metrics-logic change (e.g. the OOM-exclusion fix) or to re-apply a
+different aggregation, with no model:
+
+```bash
+python -m jev.cli report outputs/qwen_tune_v5.predictions.jsonl
+# writes outputs/qwen_tune_v5.report.{json,md} next to the predictions and prints the table
+```
+
+`report` reuses the `config`/`run_name` from a sibling `<run>.report.json` when
+present; override with `--model-id`, `--adapter`, `--run-name`, `--output-dir`.
+
 ## Scoring methods
 
 Two strategies. `--score-mode` defaults to **`auto`**, which picks per item from

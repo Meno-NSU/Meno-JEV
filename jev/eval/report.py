@@ -33,7 +33,8 @@ def render_markdown(summary: Dict[str, Any]) -> str:
     if cfg:
         lines.append("")
         lines.append(
-            f"- adapter: `{cfg.get('adapter')}`  model: `{cfg.get('model_id')}`"
+            f"- adapter: `{cfg.get('adapter') or '-'}`  "
+            f"model: `{cfg.get('model_id') or '-'}`"
         )
         mode = cfg.get("score_mode") or "auto"
         lines.append(
@@ -112,3 +113,38 @@ def write_markdown(summary: Dict[str, Any], path) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(render_markdown(summary), encoding="utf-8")
     return p
+
+
+def report_from_predictions(
+    predictions_path,
+    output_dir=None,
+    run_name=None,
+    config=None,
+) -> Dict[str, Any]:
+    """Recompute metrics from a saved ``*.predictions.jsonl`` (no model needed).
+
+    Reuses the ``config``/``run_name`` from a sibling ``<run>.report.json`` when
+    present. Writes ``<run>.report.{json,md}`` and returns the summary.
+    """
+    from .metrics import summarize
+    from .preds import load_predictions
+
+    p = Path(predictions_path)
+    name = run_name or p.name.replace(".predictions.jsonl", "")
+
+    if config is None:
+        sibling = p.with_name(f"{name}.report.json")
+        if sibling.exists():
+            try:
+                config = json.loads(sibling.read_text(encoding="utf-8")).get("config")
+            except (ValueError, OSError):
+                config = None
+
+    summary = summarize(load_predictions(p), cfg=config)
+    summary["run_name"] = name
+    summary["predictions_path"] = str(p)
+
+    out = Path(output_dir) if output_dir else p.parent
+    write_json(summary, out / f"{name}.report.json")
+    write_markdown(summary, out / f"{name}.report.md")
+    return summary

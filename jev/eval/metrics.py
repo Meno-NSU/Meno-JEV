@@ -99,7 +99,9 @@ def summarize(preds: List, cfg: Optional[object] = None) -> Dict[str, Any]:
             for p in errors[:50]
         ],
     }
-    if cfg is not None:
+    if isinstance(cfg, dict):
+        summary["config"] = cfg
+    elif cfg is not None:
         summary["config"] = {
             "adapter": getattr(cfg, "adapter", None),
             "model_id": getattr(cfg, "model_id", None),

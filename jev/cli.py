@@ -179,9 +179,26 @@ def cmd_smoke(args) -> int:
     return 0 if summary["ok"] else 1
 
 
+def _apply_safe_defaults(args) -> None:
+    """Conservative memory settings to (almost) eliminate CUDA OOM, at the cost
+    of speed. Only fills values the user did not set explicitly."""
+    if not getattr(args, "safe", False):
+        return
+    if args.max_context_tokens is None:
+        args.max_context_tokens = 8192
+    if args.batch_size is None:
+        args.batch_size = 1          # one candidate per forward
+    if args.max_batch_tokens is None:
+        args.max_batch_tokens = 2048
+    if args.dtype == "auto":
+        args.dtype = "bfloat16"
+
+
 def _build_run_config(args):
     from .eval.runner import RunConfig
     from .prompts.options import PromptOptions
+
+    _apply_safe_defaults(args)
 
     noul_words = ("true", "false")
     if getattr(args, "noul_words", None):
@@ -344,6 +361,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Qwen: keep thinking mode ON (default: OFF)")
     pr.add_argument("--state-fit", choices=["head", "tail", "head_tail", "none"], default="head_tail")
     pr.add_argument("--max-batch-tokens", type=int, default=None, help="tokens per forward pass (default: auto from GPU memory)")
+    pr.add_argument("--safe", action="store_true",
+                    help="conservative memory settings to avoid CUDA OOM (slower): "
+                         "caps context at 8192, batch=1, dtype bfloat16")
     pr.add_argument("--output-dir", default="outputs")
     pr.add_argument("--run-name", default=None)
     pr.set_defaults(func=cmd_run)

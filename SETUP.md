@@ -153,6 +153,30 @@ python -m jev.cli smoke --data benchmark.json --per-source-limit 1 \
 | `--max-context-tokens N` | cap context for long states (see below) |
 | `--max-batch-tokens N` | tokens per forward pass (default: auto from GPU memory; lower if you OOM) |
 | `--batch-size N` | candidates scored per call (default: auto by token budget) |
+| `--safe` | conservative memory preset to avoid OOM (slower): context 8192, batch 1, bfloat16 |
+
+### Getting zero OOM (slow but safe)
+
+The OOMs come from very long prompts (some states are up to ~328k chars) and
+from batching several long sequences together. To guarantee no OOM, at the cost
+of speed:
+
+```bash
+python -m jev.cli run --data benchmark.json --adapter qwen \
+    --model-id Qwen/Qwen3.5-9B --sample 10000 --seed 56 \
+    --safe --output-dir outputs --run-name qwen_safe
+```
+
+`--safe` sets `--max-context-tokens 8192`, `--batch-size 1`,
+`--max-batch-tokens 2048`, `--dtype bfloat16`. Each forward is then a single
+sequence of at most 8k tokens, which fits comfortably on an 80 GB card. You can
+override any of these (e.g. `--max-context-tokens 16384` if you need longer
+context and have headroom).
+
+Speed note (Qwen3.5 / hybrid models): the logged fallbacks for `causal_conv1d`
+and `flash-linear-attention` mean slow reference kernels. Installing those
+packages speeds everything up a lot (optional, and version-sensitive):
+`pip install causal-conv1d flash-linear-attention`.
 | `--score-mode auto` / `continuation` / `next_token` | scoring method (`auto` picks per item; default) |
 | `--normalize length` / `sum` / `none` | candidate log-prob normalisation |
 | `--state-fit head` / `tail` / `head_tail` / `none` | how long states are truncated |

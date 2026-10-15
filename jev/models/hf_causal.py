@@ -96,6 +96,8 @@ class HFCausalAdapter(ModelAdapter):
         )
         self.oom_retries = 0
         self._oom_notice_shown = False
+        self._batch_calls = 0
+        self._empty_cache_every = int(self.config.extra.get("empty_cache_every", 100))
 
     # -- lifecycle -------------------------------------------------------
     def load(self) -> None:
@@ -132,15 +134,17 @@ class HFCausalAdapter(ModelAdapter):
         if not cfg.model_id:
             raise ValueError("ModelConfig.model_id is required")
 
+        self._preflight_memory_check()
+
         self._tokenizer = AutoTokenizer.from_pretrained(
             cfg.model_id, trust_remote_code=cfg.trust_remote_code
         )
         if cfg.chat_template:
             self._tokenizer.chat_template = cfg.chat_template
 
+        dtype_val = _resolve_torch_dtype(torch, cfg.dtype)
         model_kwargs: Dict[str, object] = {
             "trust_remote_code": cfg.trust_remote_code,
-            "torch_dtype": _resolve_torch_dtype(torch, cfg.dtype),
         }
         if cfg.attn_implementation:
             model_kwargs["attn_implementation"] = cfg.attn_implementation
@@ -150,7 +154,15 @@ class HFCausalAdapter(ModelAdapter):
             if torch.cuda.is_available():
                 model_kwargs["device_map"] = "auto"
             device = None
-        self._model = AutoModelForCausalLM.from_pretrained(cfg.model_id, **model_kwargs)
+        # transformers >= 4.56 renamed torch_dtype -> dtype; support both.
+        try:
+            self._model = AutoModelForCausalLM.from_pretrained(
+                cfg.model_id, dtype=dtype_val, **model_kwargs
+            )
+        except TypeError:
+            self._model = AutoModelForCausalLM.from_pretrained(
+                cfg.model_id, torch_dtype=dtype_val, **model_kwargs
+            )
 
         if "device_map" not in model_kwargs:
             if device is None:
@@ -186,6 +198,23 @@ class HFCausalAdapter(ModelAdapter):
     def max_batch_tokens(self) -> int:
         return int(self._max_batch_tokens or 8192)
 
+    def _preflight_memory_check(self) -> None:
+        torch = self._torch
+        if torch is None or not torch.cuda.is_available():
+            return
+        try:
+            free, total = torch.cuda.mem_get_info()
+        except Exception:  # noqa: BLE001
+            return
+        if total and free < 0.05 * total:
+            print(
+                f"[jev] warning: only {free / 1024**3:.2f} GiB of "
+                f"{total / 1024**3:.2f} GiB free on the GPU. Another process may "
+                "be using it (check `nvidia-smi`); pick a free device with "
+                "CUDA_VISIBLE_DEVICES=<id>. Runs can OOM at such low free memory.",
+                file=sys.stderr,
+            )
+
     def _detect_logits_keep_arg(self) -> None:
         """Work out how to ask the model for only the last few logits."""
         try:
@@ -197,6 +226,12 @@ class HFCausalAdapter(ModelAdapter):
                 self._logits_keep_arg = name
                 return
         self._logits_keep_arg = None
+        print(
+            "[jev] warning: this model's forward() does not expose "
+            "`logits_to_keep`, so full logits are computed each step (much more "
+            "memory). Reduce --max-context-tokens / --batch-size if you OOM.",
+            file=sys.stderr,
+        )
 
     @property
     def tokenizer(self):
@@ -265,15 +300,30 @@ class HFCausalAdapter(ModelAdapter):
         aligned to the *right* end of each sequence.
         """
         torch = self._torch
-        kwargs: Dict[str, object] = {}
+        kwargs: Dict[str, object] = {"use_cache": False}  # not needed for scoring
         if self._logits_keep_arg:
             kwargs[self._logits_keep_arg] = keep
-        out = self._model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            **kwargs,
-        )
+        try:
+            out = self._model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                **kwargs,
+            )
+        except TypeError:
+            # Signature detection missed (e.g. a wrapped forward). Drop the
+            # logits-truncation kwarg once and retry.
+            if self._logits_keep_arg and self._logits_keep_arg in kwargs:
+                kwargs.pop(self._logits_keep_arg)
+                self._logits_keep_arg = None
+                out = self._model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    **kwargs,
+                )
+            else:
+                raise
         return out.logits
 
     def _is_oom(self, exc: Exception) -> bool:
@@ -404,6 +454,18 @@ class HFCausalAdapter(ModelAdapter):
     ) -> List[ContinuationScore]:
         if not pairs:
             return []
+        self._batch_calls += 1
+        torch = self._torch
+        if (
+            self._empty_cache_every > 0
+            and self._batch_calls % self._empty_cache_every == 0
+            and torch is not None
+            and torch.cuda.is_available()
+        ):
+            # Release cached-but-unused blocks to fight fragmentation over a
+            # long run (this is what makes a single process slowly fill a GPU).
+            torch.cuda.empty_cache()
+
         mem = [self._prep(ctx, cont) for ctx, cont in pairs]
         results: List[Optional[ContinuationScore]] = [None] * len(mem)
         for i, (_clen, cont_ids, _full) in enumerate(mem):

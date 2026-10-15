@@ -35,6 +35,7 @@ class RunConfig:
     sample: Optional[int] = None           # small stratified subsample size
     seed: int = 0
 
+    ids: Optional[Sequence[str]] = None    # restrict to these item ids (retry)
     score_mode: Optional[str] = None       # override recipe's default
     normalize: str = "length"
     temperature: float = 1.0
@@ -90,6 +91,7 @@ def _select_items(cfg: RunConfig):
         sources=cfg.sources,
         question_types=cfg.question_types,
         splits=cfg.splits,
+        ids=cfg.ids,
     )
     if cfg.per_source_limit:
         counts: Dict[str, int] = {}
@@ -132,6 +134,7 @@ def run(cfg: RunConfig, adapter=None) -> Dict[str, Any]:
     preds: List[Prediction] = []
     with open(pred_path, "w", encoding="utf-8") as fh:
         for item in tqdm(items, desc="eval", unit="item"):
+            rq = None
             try:
                 recipe = resolve_recipe(item)
                 rq = recipe.build(item, adapter, cfg.prompt, cfg.score_mode)
@@ -172,7 +175,7 @@ def run(cfg: RunConfig, adapter=None) -> Dict[str, Any]:
                     correct=False,
                     prob_gold=0.0,
                     rank_gold=None,
-                    score_mode=cfg.score_mode or "",
+                    score_mode=(rq.score_mode if rq is not None else (cfg.score_mode or "auto")),
                     error=f"{type(exc).__name__}: {exc}",
                 )
             preds.append(pred)

@@ -329,6 +329,65 @@ def build_parser() -> argparse.ArgumentParser:
     prep.set_defaults(func=cmd_report)
 
     pr = sub.add_parser("run", help="run the evaluation")
+    _add_run_args(pr)
+    pr.set_defaults(func=cmd_run)
+
+    pt = sub.add_parser("retry", help="re-run only the failed items of a predictions file and merge")
+    pt.add_argument("predictions", help="path to the *.predictions.jsonl whose failures to retry")
+    _add_run_args(pt)
+    pt.set_defaults(func=cmd_retry)
+
+    return p
+
+
+def cmd_retry(args) -> int:
+    from .eval.preds import failed_ids, merge_predictions
+    from .eval.report import report_from_predictions, render_markdown
+    from .eval.runner import run
+
+    src = Path(args.predictions)
+    if not src.exists():
+        print(f"predictions not found: {src}")
+        return 1
+    fids = failed_ids(src)
+    base = src.name.replace(".predictions.jsonl", "")
+    if not fids:
+        print(f"No failed items in {src} — nothing to retry.")
+        return 0
+    print(f"Retrying {len(fids)} failed item(s) from {base} ...")
+
+    cfg = _build_run_config(args)
+    cfg.ids = fids
+    cfg.sample = None
+    cfg.per_source_limit = None
+    cfg.limit = None
+    if not cfg.run_name:
+        cfg.run_name = f"{base}_retry"
+    run(cfg)
+
+    out_dir = Path(args.output_dir)
+    retry_path = out_dir / f"{cfg.run_name}.predictions.jsonl"
+    merged_name = f"{base}_merged"
+    merged_path = out_dir / f"{merged_name}.predictions.jsonl"
+    merge_predictions(src, retry_path, merged_path)
+
+    config = {
+        "adapter": cfg.adapter,
+        "model_id": cfg.model_id,
+        "score_mode": cfg.score_mode,
+        "normalize": cfg.normalize,
+        "temperature": cfg.temperature,
+    }
+    summary = report_from_predictions(
+        str(merged_path), run_name=merged_name, config=config
+    )
+    print(render_markdown(summary))
+    remaining = summary.get("overall", {}).get("errors", 0)
+    print(f"retried={len(fids)}  remaining_errors={remaining}  merged -> {merged_path}")
+    return 0
+
+
+def _add_run_args(pr) -> None:
     pr.add_argument("--data", default="benchmark.json")
     pr.add_argument("--adapter", default="hf", help="model adapter name (hf, qwen, mock, ...)")
     pr.add_argument("--model-id", default=None, help="local path or HF hub id")
@@ -366,9 +425,6 @@ def build_parser() -> argparse.ArgumentParser:
                          "caps context at 8192, batch=1, dtype bfloat16")
     pr.add_argument("--output-dir", default="outputs")
     pr.add_argument("--run-name", default=None)
-    pr.set_defaults(func=cmd_run)
-
-    return p
 
 
 def main(argv: Optional[List[str]] = None) -> int:

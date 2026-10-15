@@ -146,6 +146,27 @@ python -m jev.cli report outputs/qwen_tune_v5.predictions.jsonl
 `report` reuses the `config`/`run_name` from a sibling `<run>.report.json` when
 present; override with `--model-id`, `--adapter`, `--run-name`, `--output-dir`.
 
+## Retry failed items (recovery mode)
+
+If a run has failed items (e.g. OOM), re-run **only those** and merge them back —
+no need to recompute the successful ones:
+
+```bash
+python -m jev.cli retry outputs/qwen_auto.predictions.jsonl \
+    --data benchmark.json --adapter qwen --model-id Qwen/Qwen3.5-9B \
+    --output-dir outputs
+```
+
+It reads the failed ids, runs only them (writes `<base>_retry.predictions.jsonl`),
+then overlays them onto the original into `<base>_merged.predictions.jsonl` and
+writes `<base>_merged.report.{json,md}`. Retry the merged file to chase
+residuals; the loop terminates when `remaining_errors` is 0. All `run` flags are
+accepted (e.g. `--safe`, `--max-context-tokens`).
+
+If OOM comes from a **shared GPU** (`nvidia-smi` shows another process using tens
+of GB), pick a free device with `CUDA_VISIBLE_DEVICES=<id>` — no batching setting
+can help when the card is full.
+
 ## Scoring methods
 
 Two strategies. `--score-mode` defaults to **`auto`**, which picks per item from
